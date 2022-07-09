@@ -1,82 +1,66 @@
-import hashlib, json, rsa
+import hashlib, os, json, rsa
+from pathlib import Path
+
+direct = sorted(os.listdir(os.path.dirname(__file__)))[:-1]
+BASE_DIR = Path(__file__).resolve().parent.parent
 chain = []
 
-for i in range(25):
-    a = 'block' + str(i) + '.txt'
-    with open(a) as file:
-        chain.append(json.loads(file.read()))
 
-#chain[9]['index'] = 9
-#print(9, 'index', 9)
-for i in range(25):
-    if i != chain[i]['index']:
-        chain[i]['ind ex'] = i
-        print(i, 'index', i)
-        
+for i in range(len(direct)):
+    with open(f"{os.path.dirname(__file__)}/block{i}.txt") as file:
+        chain.append(json.load(file))
+
+
+def check_index(block, block_id):
+    if block["index"] != block_id:
+        block["index"] = block_id
+        print(f"{block_id} index of {block['index']}")
+    return block
+
 
 def check_prehash(block, block_id):
-    if block_id != 0:
+    if block_id == 0:
+        if block["pre_hash"] != "0x0":
+            block["pre_hash"] = "0x0"
+            print(block_id, "pre_hash", block["pre_hash"])
+    else:
         if block["pre_hash"] != chain[block_id-1]["hash"]:
             block["pre_hash"] = chain[block_id-1]["hash"]
             print(block_id, "pre_hash", block["pre_hash"])
     return block
 
 
-for i in range(25):
-    if len(chain[i]['data']) == 4:
-        a = chain[i]['data'][0]
-        b = chain[i]['data'][1]
-        c = chain[i]['data'][2]
-        d = chain[i]['data'][3]
-        s1 = a + b
-        s2 = c + d
-        s1 = hashlib.sha3_256(s1.encode()).hexdigest()
-        s2 = hashlib.sha3_256(s2.encode()).hexdigest()
-        s = s1 + s2
-        s = hashlib.sha3_256(s.encode()).hexdigest()
-        if s != chain[i]['datahash']:
-            chain[i]['datahash'] = s
-            print(i,'datahash', s)
-    elif len(chain[i]['data']) == 2:
-        a = chain[i]['data'][0]
-        b = chain[i]['data'][1]
-        s1 = a + b
-        s1 = hashlib.sha3_256(s1.encode()).hexdigest()
-        if s1 != chain[i]['datahash']:
-            chain[i]['datahash'] = s1
-            print(i,'datahash', s1)
-    elif len(chain[i]['data']) == 1:
-        if chain[i]['data'][0] != chain[i]['datahash']:
-            print(i,'datahash', chain[i]['data'][0])
-    elif len(chain[i]['data']) == 6:
-        a = chain[i]['data'][0]
-        b = chain[i]['data'][1]
-        c = chain[i]['data'][2]
-        d = chain[i]['data'][3]
-        e = chain[i]['data'][4]
-        f = chain[i]['data'][5]
-        s1 = a + b
-        s2 = c + d
-        s3 = e + f
-        s1 = hashlib.sha3_256(s1.encode()).hexdigest()
-        s2 = hashlib.sha3_256(s2.encode()).hexdigest()
-        s3 = hashlib.sha3_256(s3.encode()).hexdigest()
-        s1 = s1 + s2
-        s2 = s3 + s3
-        s1 = hashlib.sha3_256(s1.encode()).hexdigest()
-        s2 = hashlib.sha3_256(s2.encode()).hexdigest()
-        s = s1 + s2
-        s = hashlib.sha3_256(s.encode()).hexdigest()
-        if s != chain[i]['datahash']:
-            chain[i]['datahash'] = s1
-  
+def mercule(transactions: list):
+    lst = []
+    while len(transactions) > 1:
+        for i in range(0, len(transactions), 2):
+            if i + 1 == len(transactions):
+                toHash = transactions[i]*2
+            else:
+                toHash = transactions[i] + transactions[i+1]
 
-    
+            lst.append(hashlib.md5(str(toHash).encode()).hexdigest())
+        transactions = lst
+        lst = []
+    return transactions[0]
+
+
+def check_datahash(block, block_id):
+    if block_id == 0:
+        return block
+    transactions = block["data"]
+    topHash = mercule(transactions)
+    if block["datahash"] != topHash:
+        block["datahash"] = topHash
+        print(block_id, "datahash", block["datahash"])
+    return block
+
+
 def find_nonce(block):
     nonce = 0
     while True:
         block["nonce"] = nonce
-        hsh = hashlib.sha3_256(json.dumps(block, separators=(",", ":")).encode()).hexdigest()
+        hsh = hashlib.md5(json.dumps(block, separators=(",", ":")).encode()).hexdigest()
         if hsh[:3] == "000":
             block["hash"] = hsh
             break
@@ -102,44 +86,39 @@ def check_hash(block, block_id):
     del n_block["hash"]
     if block_id != 0:
         del n_block["sign"]
-    hsh = hashlib.sha3_256(json.dumps(n_block, separators=(",", ":")).encode()).hexdigest()
+    hsh = hashlib.md5(json.dumps(n_block, separators=(",", ":")).encode()).hexdigest()
     if block["hash"] != hsh:
         block["hash"] = hsh
         print(block_id, "hash", block["hash"])
     return block
 
 
+def check_sign(block, block_id):
+    if block_id == 0:
+        return block
+    b_sign = block["sign"]
+    del block["sign"]
+    str_block = json.dumps(block, separators=(",", ":"))
+    creator = block["creator"]
+    with open(f"{BASE_DIR}/Keys/{creator}.key") as key:
+        key = key.read().split("\n")
+    keys = {}
+    for i in key:
+        keys[i[0]] = int(i[3:])
+    priv = rsa.PrivateKey(keys["n"], keys["e"], keys["d"], keys["p"], keys["q"])
+    sign = rsa.sign(str_block.encode(), priv, "SHA-1").hex()
+    if sign != b_sign:
+        block["sign"] = sign
+        print(block_id, "sign", block["sign"])
 
+    return block
 
 # enumerate возвращает список эллементов, где нулевой - id, первый - эллемент
 for block_id, block in enumerate(chain):
+    chain[block_id] = check_index(block, block_id)
+    chain[block_id] = check_datahash(block, block_id)
     chain[block_id] = check_prehash(block, block_id)
     chain[block_id] = check_nonce(block, block_id)
     chain[block_id] = check_hash(block, block_id)
-
-
-for i in range(1,25):        
-    d = chain[i]['creator']
-    f = d + '.key'
-    tr = open(f)
-    A = []
-    for line in tr:
-        line = line.rstrip('\n')
-        A.append(line.replace('d: ','').replace('e: ','').replace('n: ','').replace('p: ','').replace('q: ',''))
-
-    pubkey = rsa.PublicKey(e=int(A[1]),n=int(A[2]))
-    privkey = rsa.PrivateKey(d=int(A[0]),e=int(A[1]),n=int(A[2]),p=int(A[3]),q=int(A[4]))
-    sg = chain[i]['sign']
-    del chain[i]['sign']
-    d = str(chain[i])
-    d = d.replace("'",'"').replace(" ",'')
-
-    s = rsa.sign(d.encode(), privkey, 'SHA-224')
-    s = s.hex()
-    if s != sg:
-        print(i, 'sign', s)
-        A.clear()
-    else:
-        A.clear()
-
+    chain[block_id] = check_sign(block, block_id)
 
